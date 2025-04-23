@@ -13,13 +13,13 @@ from random import random
 from collections import defaultdict
 
 class Node:
-    def __init__(self, node_id, l, L, m, ef, ep, m0=None):
+    def __init__(self, node_id, L, m, ef, ep, m0=None):
         self.node_id = node_id
         self._m = m
         self._m0 = 2 * m if m0 is None else m0
         self._level_mult = 1 / log2(m)
         self.l = int(-log2(random()) * self._level_mult) + 1
-
+        print(self.l)
         # SEARCH-LAYER state
         self.visited = set()
         self.W = set()
@@ -27,7 +27,7 @@ class Node:
         self._ef = ef
         self.ep = [ep]
         self.current_layer = L
-        self.level_stack = [i for i in range(L, l+1, -1)]
+        self.level_stack = [i for i in range(L, self.l+1, -1)]
         self.final_W = {}
         self.search_phase = 1 # flag signifies we are in search phase 1 (where ef = 1) or search phase 2 (0 value)
         self.is_done = 0
@@ -112,7 +112,7 @@ class SearchLayerPhase:
         continue_mask = nearest_dists <= furthest_dists
 
         for i, cont in enumerate(continue_mask):
-            if not cont or not active_nodes[i].candidates:
+            if not cont:
                 node = active_nodes[i]
                 node.final_W[node.current_layer] = node.W
                 if node.level_stack: node.level_stack.pop(0)
@@ -131,7 +131,7 @@ class SearchLayerPhase:
 
         # Get unvisited neighbors of nearest nodes
         batch_nbrs = [
-            list(graphs[node.current_layer].get(int(n), set()) - node.visited)
+            list(graphs.get(node.current_layer, {}).get(int(n), set()) - node.visited)
             for node, n in zip(expanding_nodes, expanding_nearest)
         ]
         batch_nbrs_padded, nbrs_mask = pad_sets(batch_nbrs, len(expanding_nodes))
@@ -170,6 +170,18 @@ class SearchLayerPhase:
                 node.ep = [int(sorted_nodes[0])]
             elif node.search_phase == 0 and len(sorted_nodes) > 0:
                 node.ep = list(node.W)
+
+            if not node.candidates: # check for |C| > 0
+                # transition to the next layer
+                node.final_W[node.current_layer] = node.W
+                if node.level_stack: node.level_stack.pop(0)
+                if node.level_stack:
+                    node.current_layer = node.level_stack[0]
+                    node.visited = set(node.ep)
+                    node.candidates = set(node.ep)
+                    node.W = set(node.ep)
+                else:
+                    node.is_done = 1
 
 def batched_l2_distances(X, B):
     """
@@ -211,33 +223,44 @@ def pad_sets(sets, B, pad_size=None):
         mask[i, :len(items)] = True
     return padded, mask
 
-def make_dummy_graph(num_nodes, num_edges):
-    graph = defaultdict(set)
-    for i in range(num_nodes):
-        for j in range(1, num_edges + 1):
-            neighbor = (i + j) % num_nodes
-            graph[i].add(neighbor)
-            graph[neighbor].add(i)
-    return graph
-
-def make_dummy_vectors(num_nodes, dim):
-    arr = np.random.randn(num_nodes, dim)
-    return xp.array(arr)
-
 # ------------------ TESTING -------------------
-num_nodes = 10
-dim = 1
-X = make_dummy_vectors(num_nodes, dim)
-graph = make_dummy_graph(num_nodes, 3)
-graphs = [graph] * 5
 
-scheduler = InsertScheduler(X, graphs, batch_size=3)
-nodes = [Node(node_id=i, l=1, L=2, m=5, ef=2, ep=0) for i in range(4)]
+# 2D dataset
+X = np.array([
+    [0.0, 0.0],   # 0
+    [1.0, 0.0],   # 1
+    [0.0, 1.0],   # 2
+    [1.0, 1.0],   # 3
+    [0.5, 0.5],   # 4 (entry point)
+    [2.0, 2.0],   # 5 (new node to insert)
+])
+
+# Dummy layered graph: dictionary per layer
+graph = {
+    0: {  # Layer 0
+        0: {1, 2, 4},
+        1: {0, 3, 4},
+        2: {0, 3, 4},
+        3: {1, 2},
+        4: {2},
+        5: set()
+    },
+    1: {  # Layer 1
+        0: {4},
+        3: {4},
+        4: {0, 3}
+    }
+}
+
+
+
+scheduler = InsertScheduler(X, graph, batch_size=3)
+nodes = [Node(node_id=5, L=1, m=5, ef=4, ep=4) for i in range(1)]
 
 for node in nodes:
-    node.visited = {0}
-    node.candidates = {0}
-    node.W = {0}
+    node.visited = {4}
+    node.candidates = {4}
+    node.W = {4}
     scheduler.add_node(node)
 
 done_nodes = scheduler.run_until_done()
