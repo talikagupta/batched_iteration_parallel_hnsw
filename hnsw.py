@@ -19,7 +19,7 @@ class Node:
         self._m0 = 2 * m if m0 is None else m0
         self._level_mult = 1 / log2(m)
         self.l = int(-log2(random()) * self._level_mult) + 1
-        print(self.l)
+        # print(self.l)
         # SEARCH-LAYER state
         self.visited = set()
         self.W = set()
@@ -27,7 +27,7 @@ class Node:
         self._ef = ef
         self.ep = [ep]
         self.current_layer = L
-        self.level_stack = [i for i in range(L, self.l+1, -1)]
+        self.level_stack = [i for i in range(L, self.l+1 + 1, -1)]
         self.final_W = {}
         self.search_phase = 1 # flag signifies we are in search phase 1 (where ef = 1) or search phase 2 (0 value)
         self.is_done = 0
@@ -63,7 +63,7 @@ class InsertScheduler:
         for _ in range(available_slots):
             if self.waiting_queue:
                 self.active_nodes.append(self.waiting_queue.pop())
-
+        
         return done_nodes
 
     def run_until_done(self):
@@ -218,60 +218,121 @@ def pad_sets(sets, B, pad_size=None):
     padded = xp.full((B, pad_size), -1, dtype=int)
     mask = xp.zeros((B, pad_size), dtype=bool)
     for i, s in enumerate(sets):
-        items = list(s)
-        padded[i, :len(items)] = items
-        mask[i, :len(items)] = True
+        items = xp.array(list(s), dtype=int)
+        padded[i, :len(s)] = items
+        mask[i, :len(s)] = True
     return padded, mask
 
 # ------------------ TESTING -------------------
 
-# 2D dataset
-X = np.array([
-    [0.0, 0.0],   # 0
-    [1.0, 0.0],   # 1
-    [0.0, 1.0],   # 2
-    [1.0, 1.0],   # 3
-    [0.5, 0.5],   # 4 (entry point)
-    [2.0, 2.0],   # 5 (new node to insert)
-])
+# # 2D dataset
+# X = np.array([
+#     [0.0, 0.0],   # 0
+#     [1.0, 0.0],   # 1
+#     [0.0, 1.0],   # 2
+#     [1.0, 1.0],   # 3
+#     [0.5, 0.5],   # 4 (entry point)
+#     [2.0, 2.0],   # 5 (new node to insert)
+#     [3.0, 2.0],   # 6 (new node to insert)
+#     [0.0, 0.0],   # 7 (new node to insert)
+# ])
 
-# Dummy layered graph: dictionary per layer
-graph = {
-    0: {  # Layer 0
-        0: {1, 2, 4},
-        1: {0, 3, 4},
-        2: {0, 3, 4},
-        3: {1, 2},
-        4: {2},
-        5: set()
-    },
-    1: {  # Layer 1
-        0: {4},
-        3: {4},
-        4: {0, 3}
-    }
-}
+# # Dummy layered graph: dictionary per layer
+# graph = {
+#     0: {  # Layer 0
+#         0: {1, 2, 4},
+#         1: {0, 3, 4},
+#         2: {0, 3, 4},
+#         3: {1, 2},
+#         4: {2},
+#         5: set()
+#     },
+#     1: {  # Layer 1
+#         0: {4},
+#         3: {4},
+#         4: {0, 3}
+#     }
+# }
 
 
 
-scheduler = InsertScheduler(X, graph, batch_size=3)
-nodes = [Node(node_id=5, L=1, m=5, ef=4, ep=4) for i in range(1)]
+# scheduler = InsertScheduler(X, graph, batch_size=3)
+# nodes = [Node(node_id=i+5, L=1, m=5, ef=4, ep=4) for i in range(3)]
 
-for node in nodes:
-    node.visited = {4}
-    node.candidates = {4}
-    node.W = {4}
-    scheduler.add_node(node)
+# for node in nodes:
+#     node.visited = {4}
+#     node.candidates = {4}
+#     node.W = {4}
+#     scheduler.add_node(node)
 
-done_nodes = scheduler.run_until_done()
-done_node_states = [
-    {
-        "id": node.node_id,
-        "final_W": sorted(list(node.W)),
-        "visited": sorted(list(node.visited))
-    }
-    for node in done_nodes
+# done_nodes = scheduler.run_until_done()
+# done_node_states = [
+#     {
+#         "id": node.node_id,
+#         "final_W": sorted(list(node.W)),
+#         "visited": sorted(list(node.visited))
+#     }
+#     for node in done_nodes
+# ]
+
+# print(done_node_states)
+# print("Running with:", "CuPy (GPU)" if CUPY_ENABLED else "NumPy (CPU)")
+
+
+import time
+
+# Parameters
+N = 100000            # Total number of nodes in the dataset
+D = 128              # Vector dimension
+L = 4                # Number of HNSW layers
+M = 32                # Maximum number of connections
+INSERT_COUNT = 10000  # Number of new nodes to insert
+BATCH_SIZE = 1000     # Insert scheduler batch size
+EF = 32              # ef parameter for search
+ENTRY_POINT = 0      # Use first node as entry point
+
+# Create synthetic dataset
+X = xp.random.randn(N, D).astype(xp.float32)
+X = X / xp.linalg.norm(X, axis=1, keepdims=True)  # normalize for fair distances
+
+# Random graph generation for each layer
+def generate_random_hnsw_graph(num_nodes, num_layers, max_connections):
+    graph = defaultdict(dict)
+    
+    for l in range(num_layers + 1):
+        # Generate neighbor indices in batch
+        all_neighbors = xp.random.randint(0, num_nodes, size=(num_nodes, 2 * max_connections))
+        
+        for i in range(num_nodes):
+            nbrs = all_neighbors[i]
+            # Remove self-connections and duplicates
+            nbrs = xp.unique(nbrs[nbrs != i])[:max_connections]
+            graph[l][i] = set(map(int, nbrs.get() if CUPY_ENABLED else nbrs))
+
+    return graph
+
+graph = generate_random_hnsw_graph(N - INSERT_COUNT, L, M)
+
+# Create InsertScheduler and nodes to insert
+scheduler = InsertScheduler(X, graph, batch_size=BATCH_SIZE)
+start_id = N - INSERT_COUNT
+new_nodes = [
+    Node(node_id=i, L=L, m=M, ef=EF, ep=ENTRY_POINT)
+    for i in range(start_id, N)
 ]
 
-print(done_node_states)
-print("Running with:", "CuPy (GPU)" if CUPY_ENABLED else "NumPy (CPU)")
+# Initialize each node with ep state
+for node in new_nodes:
+    node.visited = {ENTRY_POINT}
+    node.candidates = {ENTRY_POINT}
+    node.W = {ENTRY_POINT}
+    scheduler.add_node(node)
+
+# Measure insertion time
+start_time = time.time()
+scheduler.run_until_done()
+end_time = time.time()
+
+print(f"Insertion of {INSERT_COUNT} nodes completed in {end_time - start_time:.2f} seconds.")
+print("Running on:", "CuPy (GPU)" if CUPY_ENABLED else "NumPy (CPU)")
+
