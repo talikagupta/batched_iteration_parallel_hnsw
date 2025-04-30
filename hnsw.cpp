@@ -78,7 +78,7 @@ class HnswGraph {
         int maxM;               // Max connections per element per layer (>0) (Can be same as M)
         int maxM0;              // Max connections at layer 0
         float levelMultiplier;  // mL parameter
-        size_t efConstruction;  // efConstruction value (often needed during search/insert)
+        size_t efConstruction;  // efConstruction value
     
         // --- Graph Structure ---
         // Layers stored bottom-up (index == layer ID)
