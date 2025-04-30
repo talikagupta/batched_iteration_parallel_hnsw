@@ -428,26 +428,15 @@ class HnswBatchScheduler {
             // 1. Prepare for Batch Distance Calculation
             for (auto& statePtr : activeNodes) {
                 NodeInsertionState& state = *statePtr;
-
-                // if (state.candidates.empty()) {
-                //     // will this ever happen?
-                //     continue; // Nothing to explore for this node in this iteration
-                // }
     
-                // // Alg 2, Line 5: Extract nearest element c from C
+                // Extract nearest element c from C
                 state.candidateToExplore = state.candidates.top().nodeId;
                 state.candidates.pop();
     
-                // // Alg 2, Line 7: Check termination condition
-                // float furthestDistW = state.getFurthestDistanceW(); 
-                // if (dist(c, q) > furthestDistW) { 
-                //     // can you check this before inserting into the batch scheduler?
-                //     continue; }
-    
-                // Alg 2, Line 9: Get neighbors of c
+                // Get neighbors of c
                 const auto& neighbors = hnswGraph.getNeighbors(state.candidateToExplore, state.currentLayer);
     
-                // Alg 2, Line 10: Check if neighbor e is visited
+                // Check if neighbor e is visited
                 for (NodeId neighborId : neighbors) {
                     if (state.visited.find(neighborId) == state.visited.end()) {
                         state.neighborsToCalc.push_back(neighborId); //can have this as a set
